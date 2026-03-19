@@ -4,6 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'ClaimCheck — Evidence-Based Claim Evaluation',
   description: 'Evaluate claims with real evidence from credible sources. Transparent, nuanced analysis grounded in real research and reporting.',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
