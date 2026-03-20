@@ -130,6 +130,8 @@ interface AnalysisResult {
   consensus: Array<{ text: string; sourceIds: string[] }>;
   disputes: Array<{ text: string; sourceIds: string[] }>;
   arguments: ArgumentRecord[];
+  summary: string | null;
+  takes: string[];
 }
 
 // ── Claude-powered source analysis ───────────────────────────────────────────
@@ -147,39 +149,53 @@ async function analyzeSourcesWithClaude(
     .map((s, i) => `Source ${i + 1} [id:${s.id}] (${s.publisher}, credibility:${s.credibility_score}):\n${s.snippet_text}`)
     .join('\n\n');
 
-  const prompt = `You are analyzing sources to evaluate the following claim:
+  const prompt = `You are a fact-checking analyst evaluating the following claim using only the sources provided.
 
 CLAIM: "${claimText}"
 
-Here are the retrieved sources. For each source, determine whether it SUPPORTS the claim (evidence the claim is true), OPPOSES it (evidence the claim is false or misleading), or is NEUTRAL.
-
+SOURCES:
 ${sourceList}
 
-Return ONLY valid JSON with this exact structure (no markdown, no explanation):
+Return ONLY valid JSON — no markdown, no explanation, just the JSON object.
+
 {
+  "summary": "2-3 plain-English sentences stating what the evidence actually shows about this specific claim. Be direct and honest. If evidence is limited or mixed, say so explicitly.",
+  "takes": [
+    "Publisher name: most informative or surprising single sentence from this source about the claim"
+  ],
   "consensus": [
-    {"text": "What the sources broadly agree on (factual statement)", "sourceIds": ["id1", "id2"]}
+    {"text": "A specific factual point that multiple sources agree on — must be a concrete statement, not 'sources address this topic'", "sourceIds": ["exact-uuid-here"]}
   ],
   "disputes": [
-    {"text": "Where sources conflict or what complicates the claim", "sourceIds": ["id1", "id2"]}
+    {"text": "A specific point where sources contradict each other, or an important caveat that complicates the claim", "sourceIds": ["exact-uuid-here"]}
   ],
   "supporting_args": [
-    {"argument_text": "Specific argument FOR the claim being true", "evidence_text": "Direct quote or finding from a source", "source_ids": ["id1"], "strength": "strong"}
+    {
+      "argument_text": "One specific sentence making the case FOR this claim being true, based directly on a source — never write 'X sources provide evidence' or generic statements",
+      "evidence_text": "\"Verbatim or near-verbatim quote pulled directly from the source snippet above\"",
+      "source_ids": ["exact-uuid-here"],
+      "strength": "strong"
+    }
   ],
   "opposing_args": [
-    {"argument_text": "Specific argument AGAINST the claim or why it's misleading", "evidence_text": "Direct quote or finding from a source", "source_ids": ["id1"], "strength": "moderate"}
+    {
+      "argument_text": "One specific sentence making the case AGAINST this claim, based directly on a source — if no source clearly opposes it, write: 'Sources do not clearly establish that [specific aspect of claim] is false, but note that [specific caveat from source]'",
+      "evidence_text": "\"Verbatim or near-verbatim quote pulled directly from the source snippet above\"",
+      "source_ids": ["exact-uuid-here"],
+      "strength": "moderate"
+    }
   ]
 }
 
-Rules:
-- strength must be "strong", "moderate", or "weak"
-- Use the exact id values from [id:...] in your sourceIds/source_ids arrays
-- Generate 2-3 items per section
-- Base arguments on what the sources actually say, not generic statements
-- consensus = what multiple sources agree on (factual, not just "sources exist")
-- disputes = genuine conflicts between sources or important caveats
-- supporting_args = arguments FOR the claim being true/accurate
-- opposing_args = arguments AGAINST the claim or why it might be false/overstated`;
+STRICT RULES:
+- source_ids and sourceIds must use the EXACT UUID values from [id:...] in the sources above
+- evidence_text MUST be a direct quote from the snippet — copy the words, do not paraphrase
+- argument_text must be ONE sentence, specific to this exact claim, grounded in a source
+- NEVER write argument_text like "X sources raise concerns" or "multiple sources provide evidence" — that is too vague
+- takes: extract the single clearest sentence from each of the top 3 sources; attribute as "Publisher: quote"
+- If the sources genuinely don't address one side, say so clearly rather than inventing support
+- strength: "strong" = credible source with direct evidence, "moderate" = indirect or partial, "weak" = tangential
+- Generate 2-3 items for supporting_args and opposing_args; 2-3 for consensus and disputes; 3 takes`;
 
   try {
     const client = new Anthropic();
@@ -218,7 +234,10 @@ Rules:
       strength: (['strong', 'moderate', 'weak'].includes(a.strength) ? a.strength : 'moderate') as 'strong' | 'moderate' | 'weak',
     }));
 
-    return { consensus, disputes, arguments: [...supporting, ...opposing] };
+    const summary: string | null = typeof parsed.summary === 'string' && parsed.summary.length > 10 ? parsed.summary : null;
+    const takes: string[] = Array.isArray(parsed.takes) ? parsed.takes.filter((t: unknown) => typeof t === 'string' && t.length > 10).slice(0, 4) : [];
+
+    return { consensus, disputes, arguments: [...supporting, ...opposing], summary, takes };
   } catch (err) {
     console.error('Claude analysis failed, using fallback:', err);
     return buildFallbackAnalysis(sources, claimText);
@@ -236,12 +255,14 @@ function buildFallbackAnalysis(sources: SourceRecord[], claimText: string): Anal
       { side: 'supporting', argument_text: 'Some sources provide evidence consistent with this claim', evidence_text: sources[0]?.snippet_text?.split(/[.!?]+/)[0]?.trim() || null, source_ids: ids.slice(0, 2), strength: 'moderate' },
       { side: 'opposing', argument_text: 'Other sources present information that complicates or challenges this claim', evidence_text: null, source_ids: ids.slice(1, 3), strength: 'moderate' },
     ],
+    summary: null,
+    takes: [],
   };
 }
 
 // ── Analysis builder ──────────────────────────────────────────────────────────
 
-function buildAnalysis(claimText: string, sources: SourceRecord[], category: string) {
+function buildAnalysis(claimText: string, sources: SourceRecord[], category: string, claudeSummary: string | null) {
   const highCred = sources.filter((s) => s.credibility_score >= 0.85);
   const count = highCred.length;
 
@@ -252,12 +273,12 @@ function buildAnalysis(claimText: string, sources: SourceRecord[], category: str
   if (count === 0) {
     status = 'Insufficient Evidence';
     evidenceQuality = 'Limited';
-    summaryText = 'Limited credible evidence is available to evaluate this claim comprehensively.';
+    summaryText = claudeSummary ?? 'Limited credible evidence is available to evaluate this claim comprehensively.';
   } else if (count >= 5) {
     evidenceQuality = 'High';
-    summaryText = `Based on ${count} high-quality sources, this claim has been thoroughly evaluated. Multiple credible institutions and research bodies have examined this topic.`;
+    summaryText = claudeSummary ?? `Based on ${count} high-quality sources, this claim has been thoroughly evaluated.`;
   } else {
-    summaryText = `Based on ${count} credible source${count > 1 ? 's' : ''}, preliminary evidence is available. Further research may provide additional clarity.`;
+    summaryText = claudeSummary ?? `Based on ${count} credible source${count > 1 ? 's' : ''}, preliminary evidence is available. Further research may provide additional clarity.`;
   }
 
   const patterns: Record<string, string> = {
@@ -330,13 +351,14 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
     if (data) insertedSources.push(data);
   }
 
-  const analysis = buildAnalysis(claimText, insertedSources, category);
   const sourceAnalysis = await analyzeSourcesWithClaude(claimText, insertedSources);
+  const analysis = buildAnalysis(claimText, insertedSources, category, sourceAnalysis.summary);
 
   await supabase.from('claims').update(analysis.claimUpdate).eq('id', claimId);
 
-  if (analysis.takes.length > 0) {
-    await supabase.from('claim_takes').insert(analysis.takes.map((t, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, take_text: t, display_order: i })));
+  const takes = sourceAnalysis.takes.length > 0 ? sourceAnalysis.takes : analysis.takes;
+  if (takes.length > 0) {
+    await supabase.from('claim_takes').insert(takes.map((t, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, take_text: t, display_order: i })));
   }
 
   if (sourceAnalysis.consensus.length > 0) {
