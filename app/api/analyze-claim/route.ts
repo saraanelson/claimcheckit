@@ -69,12 +69,36 @@ interface TavilyResult {
   published_date?: string;
 }
 
+const LOW_QUALITY_DOMAINS = [
+  'reddit.com', 'quora.com', 'pinterest.com', 'facebook.com', 'twitter.com',
+  'x.com', 'instagram.com', 'tiktok.com', 'youtube.com', 'linkedin.com',
+  'tumblr.com', 'yelp.com', 'tripadvisor.com', 'medium.com', 'substack.com',
+  'wikipedia.org', 'wikihow.com', 'answers.com', 'yahoo.com',
+];
+
+function isLowQualitySource(url: string): boolean {
+  const l = url.toLowerCase();
+  return LOW_QUALITY_DOMAINS.some((d) => l.includes(d));
+}
+
 async function searchTavily(query: string): Promise<TavilyResult[]> {
   const apiKey = process.env.TAVILY_API_KEY ?? '';
   const res = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, query, search_depth: 'advanced', max_results: 8, include_answer: false }),
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      search_depth: 'advanced',
+      max_results: 12,
+      include_answer: false,
+      exclude_domains: [
+        'reddit.com', 'quora.com', 'pinterest.com', 'facebook.com',
+        'twitter.com', 'x.com', 'instagram.com', 'tiktok.com',
+        'youtube.com', 'linkedin.com', 'medium.com', 'substack.com',
+        'tumblr.com', 'yelp.com', 'tripadvisor.com', 'wikipedia.org',
+      ],
+    }),
   });
   if (!res.ok) throw new Error(`Tavily error ${res.status}`);
   const data = await res.json();
@@ -280,14 +304,16 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
     console.error('Tavily search failed:', err);
   }
 
-  if (tavilyResults.length === 0) {
+  const filteredResults = tavilyResults.filter((r) => !isLowQualitySource(r.url)).slice(0, 8);
+
+  if (filteredResults.length === 0) {
     await supabase.from('claims').update({ current_status: 'Insufficient Evidence', evidence_quality: 'Limited', summary_text: 'Not enough credible sources were found to evaluate this claim.', misinformation_pattern_text: 'Unable to verify due to lack of credible sources.' }).eq('id', claimId);
     await supabase.from('claim_runs').update({ run_status: 'completed', completed_at: new Date().toISOString() }).eq('id', claimRunData.id);
     return;
   }
 
   const insertedSources: SourceRecord[] = [];
-  for (const r of tavilyResults) {
+  for (const r of filteredResults) {
     const { data } = await supabase.from('sources').insert({
       claim_id: claimId,
       claim_run_id: claimRunData.id,
