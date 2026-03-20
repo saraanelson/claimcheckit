@@ -271,6 +271,13 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
   const againstArgs = arguments_.filter((a) => a.side === 'opposing');
   const hasArguments = forArgs.length > 0 || againstArgs.length > 0;
   const showBothSides = hasArguments && claim.current_status !== 'Insufficient Evidence';
+  const strengthWeight = (a: ClaimArgument) => a.strength === 'strong' ? 3 : a.strength === 'moderate' ? 2 : 1;
+  const forWeight = forArgs.reduce((s, a) => s + strengthWeight(a), 0);
+  const agWeight = againstArgs.reduce((s, a) => s + strengthWeight(a), 0);
+  const totalWeight = forWeight + agWeight || 1;
+  const forPct = Math.round((forWeight / totalWeight) * 100);
+  const agPct = 100 - forPct;
+  const evidenceLean = forPct >= 60 ? 'leans supporting' : agPct >= 60 ? 'leans challenging' : 'is split';
   const verdictCfg = VERDICT_CONFIG[claim.current_status] || VERDICT_CONFIG['Insufficient Evidence'];
 
   return (
@@ -423,9 +430,18 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                     </div>
                     <h3 className="font-serif text-2xl text-stone-900 dark:text-stone-100">Both Sides</h3>
                   </div>
-                  <p className="text-sm text-stone-500 dark:text-stone-400">
-                    Structured arguments for and against this claim, weighted by source credibility
+                  <p className="text-sm text-stone-500 dark:text-stone-400 mb-4">
+                    Evidence {evidenceLean} — {forArgs.length} supporting, {againstArgs.length} challenging
                   </p>
+                  {/* Balance bar */}
+                  <div className="flex rounded-full overflow-hidden h-2.5 bg-stone-100 dark:bg-stone-800">
+                    <div className="bg-emerald-500 transition-all duration-500" style={{ width: `${forPct}%` }} />
+                    <div className="bg-red-500 transition-all duration-500" style={{ width: `${agPct}%` }} />
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">{forPct}% supporting</span>
+                    <span className="text-[11px] text-red-500 dark:text-red-400 font-medium">{agPct}% challenging</span>
+                  </div>
                 </div>
 
                 {/* Two columns */}
@@ -443,20 +459,17 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                       {forArgs.length === 0 ? (
                         <p className="text-sm text-stone-400 dark:text-stone-500 italic py-2">No strong supporting arguments found</p>
                       ) : (
-                        forArgs.map((arg, i) => {
+                        forArgs.slice(0, 2).map((arg, i) => {
                           const backed = sources.filter((s) => arg.source_ids?.includes(s.id));
                           return (
                             <div key={arg.id || i} className={`animate-fade-up stagger-${Math.min(i + 1, 6)}`}>
-                              <div className="flex items-start gap-2 mb-1.5">
-                                <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                              <div className="flex items-start gap-2">
+                                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
                                   arg.strength === 'strong' ? 'bg-emerald-500' : arg.strength === 'moderate' ? 'bg-emerald-400' : 'bg-emerald-300'
                                 }`} />
                                 <div className="flex-1">
                                   <p className="text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug">{arg.argument_text}</p>
-                                  {arg.evidence_text && (
-                                    <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed italic">{arg.evidence_text}</p>
-                                  )}
-                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                       arg.strength === 'strong'
                                         ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
@@ -466,7 +479,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                     }`}>
                                       {arg.strength}
                                     </span>
-                                    {backed.slice(0, 2).map((s) => (
+                                    {backed.slice(0, 1).map((s) => (
                                       <a key={s.id} href={s.url} target="_blank" rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-teal-600 dark:text-teal-400 hover:underline truncate max-w-[120px]">
                                         {s.publisher || getDomain(s.url)}
@@ -475,7 +488,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                   </div>
                                 </div>
                               </div>
-                              {i < forArgs.length - 1 && <hr className="mt-4 border-stone-100 dark:border-stone-800" />}
+                              {i < Math.min(forArgs.length, 2) - 1 && <hr className="mt-3 border-stone-100 dark:border-stone-800" />}
                             </div>
                           );
                         })
@@ -496,20 +509,17 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                       {againstArgs.length === 0 ? (
                         <p className="text-sm text-stone-400 dark:text-stone-500 italic py-2">No strong challenging arguments found</p>
                       ) : (
-                        againstArgs.map((arg, i) => {
+                        againstArgs.slice(0, 2).map((arg, i) => {
                           const backed = sources.filter((s) => arg.source_ids?.includes(s.id));
                           return (
                             <div key={arg.id || i} className={`animate-fade-up stagger-${Math.min(i + 1, 6)}`}>
-                              <div className="flex items-start gap-2 mb-1.5">
-                                <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                              <div className="flex items-start gap-2">
+                                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
                                   arg.strength === 'strong' ? 'bg-red-500' : arg.strength === 'moderate' ? 'bg-red-400' : 'bg-red-300'
                                 }`} />
                                 <div className="flex-1">
                                   <p className="text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug">{arg.argument_text}</p>
-                                  {arg.evidence_text && (
-                                    <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed italic">{arg.evidence_text}</p>
-                                  )}
-                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                       arg.strength === 'strong'
                                         ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
@@ -519,7 +529,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                     }`}>
                                       {arg.strength}
                                     </span>
-                                    {backed.slice(0, 2).map((s) => (
+                                    {backed.slice(0, 1).map((s) => (
                                       <a key={s.id} href={s.url} target="_blank" rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-teal-600 dark:text-teal-400 hover:underline truncate max-w-[120px]">
                                         {s.publisher || getDomain(s.url)}
@@ -528,7 +538,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                   </div>
                                 </div>
                               </div>
-                              {i < againstArgs.length - 1 && <hr className="mt-4 border-stone-100 dark:border-stone-800" />}
+                              {i < Math.min(againstArgs.length, 2) - 1 && <hr className="mt-3 border-stone-100 dark:border-stone-800" />}
                             </div>
                           );
                         })
