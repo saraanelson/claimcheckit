@@ -175,7 +175,7 @@ function buildArguments(sources: SourceRecord[], claimText: string, category: st
       const snippet = s.snippet_text!.toLowerCase();
       const supportSignals = ['confirmed','supports','evidence shows','research shows','study found','data shows','consistent with','demonstrates','indicates','suggests that','found that','according to','proven','established','validates','corroborates'].filter((sig) => snippet.includes(sig)).length;
       const againstSignals = ['however','disputed','controversial','debated','conflicting','disagree','challenge','question','unclear','mixed results','no evidence','insufficient','contradicts','misleading','overstate','exaggerate','nuanced','complex','limited','caveat','exception','but','although','despite','fails to','does not','unlikely','refutes'].filter((sig) => snippet.includes(sig)).length;
-      const relevance = [...claimWords].filter((w) => snippet.includes(w)).length / Math.max(claimWords.size, 1);
+      const relevance = Array.from(claimWords).filter((w) => snippet.includes(w)).length / Math.max(claimWords.size, 1);
       return { source: s, supportSignals, againstSignals, relevance, side: supportSignals > againstSignals ? 'supporting' as const : againstSignals > supportSignals ? 'opposing' as const : 'neutral' as const };
     });
 
