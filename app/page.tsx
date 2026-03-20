@@ -146,13 +146,9 @@ export default function HomePage() {
     if (!text.trim() || isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const apiUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/analyze-claim`;
-      const response = await fetch(apiUrl, {
+      const response = await fetch('/api/analyze-claim', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ claimText: text }),
       });
       const data = await response.json();
