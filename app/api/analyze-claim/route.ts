@@ -147,7 +147,7 @@ function findConsensusAndDisputes(sources: SourceRecord[], claimText: string) {
 
   const methodTypes = new Set(sourceAnalysis.map((a) => a.source.source_type));
   if (methodTypes.size >= 3 && disputes.length < 3) {
-    disputes.push({ text: `Different source types (${[...methodTypes].slice(0,3).join(', ').toLowerCase()}) approach this topic from different angles, leading to varying emphasis`, sourceIds: sourceAnalysis.slice(0,3).map((a) => a.source.id) });
+    disputes.push({ text: `Different source types (${Array.from(methodTypes).slice(0,3).join(', ').toLowerCase()}) approach this topic from different angles, leading to varying emphasis`, sourceIds: sourceAnalysis.slice(0,3).map((a) => a.source.id) });
   }
 
   if (consensus.length === 0) consensus.push({ text: 'Available sources address this topic but with limited overlap in their specific findings', sourceIds: sourceAnalysis.slice(0,2).map((a) => a.source.id) });
