@@ -27,6 +27,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Shield,
+  XCircle,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import type { Claim, Source, ClaimTake, ClaimConsensusPoint, ClaimDispute, ClaimArgument } from '../../../lib/supabase';
@@ -104,11 +105,16 @@ function getFaviconUrl(url: string): string {
 // ── Verdict styling ───────────────────────────────────────────────────────────
 
 const VERDICT_CONFIG: Record<string, { icon: React.ReactNode; gradient: string; bg: string; border: string; text: string }> = {
-  'Well Supported':        { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
-  'Partially Supported':   { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-amber-500 to-yellow-500', bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-amber-200 dark:border-amber-800', text: 'text-amber-800 dark:text-amber-300' },
-  'Misleading':            { icon: <AlertOctagon className="w-8 h-8" />, gradient: 'from-red-600 to-rose-600', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-200 dark:border-red-800', text: 'text-red-800 dark:text-red-300' },
+  'True':                  { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
+  'Mostly True':           { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-teal-500 to-emerald-500', bg: 'bg-teal-50 dark:bg-teal-950/30', border: 'border-teal-200 dark:border-teal-800', text: 'text-teal-800 dark:text-teal-300' },
+  'Misleading':            { icon: <AlertOctagon className="w-8 h-8" />, gradient: 'from-orange-500 to-amber-500', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-200 dark:border-orange-800', text: 'text-orange-800 dark:text-orange-300' },
+  'Mostly False':          { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-orange-600 to-red-500', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-300 dark:border-orange-800', text: 'text-orange-900 dark:text-orange-300' },
+  'False':                 { icon: <XCircle className="w-8 h-8" />, gradient: 'from-red-600 to-rose-600', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-200 dark:border-red-800', text: 'text-red-800 dark:text-red-300' },
   'Under Debate':          { icon: <HelpCircle className="w-8 h-8" />, gradient: 'from-blue-600 to-indigo-600', bg: 'bg-blue-50 dark:bg-blue-950/30', border: 'border-blue-200 dark:border-blue-800', text: 'text-blue-800 dark:text-blue-300' },
   'Insufficient Evidence': { icon: <AlertCircle className="w-8 h-8" />, gradient: 'from-stone-500 to-stone-600', bg: 'bg-stone-100 dark:bg-stone-800/50', border: 'border-stone-200 dark:border-stone-700', text: 'text-stone-700 dark:text-stone-300' },
+  // legacy aliases
+  'Well Supported':        { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
+  'Partially Supported':   { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-amber-500 to-yellow-500', bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-amber-200 dark:border-amber-800', text: 'text-amber-800 dark:text-amber-300' },
 };
 
 function getEvidenceQualityColor(quality: string): string {
@@ -344,7 +350,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Star className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                    <h3 className="font-semibold text-stone-900 dark:text-stone-100">Confidence Score</h3>
+                    <h3 className="font-semibold text-stone-900 dark:text-stone-100">Evidence Quality</h3>
                   </div>
                   <span className="text-3xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
                     {confidence}<span className="text-base font-normal text-stone-400">/100</span>
@@ -357,7 +363,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                   />
                 </div>
                 <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">
-                  Weighted by source tier, recency, and {sources.length} credible source{sources.length !== 1 ? 's' : ''}
+                  How reliable and complete the sources are — not whether the claim is true
                 </p>
               </div>
             )}

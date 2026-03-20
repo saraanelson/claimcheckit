@@ -132,6 +132,7 @@ interface AnalysisResult {
   arguments: ArgumentRecord[];
   summary: string | null;
   takes: string[];
+  verdict: string | null;
 }
 
 // ── Claude-powered source analysis ───────────────────────────────────────────
@@ -142,7 +143,7 @@ async function analyzeSourcesWithClaude(
 ): Promise<AnalysisResult> {
   const validSources = sources.filter((s) => s.snippet_text && s.snippet_text.length > 30);
   if (validSources.length === 0) {
-    return { consensus: [], disputes: [], arguments: [] };
+    return { consensus: [], disputes: [], arguments: [], summary: null, takes: [], verdict: null };
   }
 
   const sourceList = validSources
@@ -159,6 +160,7 @@ ${sourceList}
 Return ONLY valid JSON — no markdown, no explanation, just the JSON object.
 
 {
+  "verdict": "Mostly False",
   "summary": "2-3 plain-English sentences stating what the evidence actually shows about this specific claim. Be direct and honest. If evidence is limited or mixed, say so explicitly.",
   "takes": [
     "Publisher name: most informative or surprising single sentence from this source about the claim"
@@ -188,6 +190,7 @@ Return ONLY valid JSON — no markdown, no explanation, just the JSON object.
 }
 
 STRICT RULES:
+- verdict must be exactly one of: "True", "Mostly True", "Misleading", "Mostly False", "False", "Under Debate", "Insufficient Evidence" — choose based on what the preponderance of credible sources say about the claim AS STATED; if most sources contradict it, use "False" or "Mostly False"
 - source_ids and sourceIds must use the EXACT UUID values from [id:...] in the sources above
 - evidence_text MUST be a direct quote from the snippet — copy the words, do not paraphrase
 - argument_text must be ONE sentence, specific to this exact claim, grounded in a source
@@ -236,8 +239,10 @@ STRICT RULES:
 
     const summary: string | null = typeof parsed.summary === 'string' && parsed.summary.length > 10 ? parsed.summary : null;
     const takes: string[] = Array.isArray(parsed.takes) ? parsed.takes.filter((t: unknown) => typeof t === 'string' && t.length > 10).slice(0, 4) : [];
+    const ALLOWED_VERDICTS = ['True', 'Mostly True', 'Misleading', 'Mostly False', 'False', 'Under Debate', 'Insufficient Evidence'];
+    const verdict: string | null = typeof parsed.verdict === 'string' && ALLOWED_VERDICTS.includes(parsed.verdict) ? parsed.verdict : null;
 
-    return { consensus, disputes, arguments: [...supporting, ...opposing], summary, takes };
+    return { consensus, disputes, arguments: [...supporting, ...opposing], summary, takes, verdict };
   } catch (err) {
     console.error('Claude analysis failed, using fallback:', err);
     return buildFallbackAnalysis(sources, claimText);
@@ -257,21 +262,26 @@ function buildFallbackAnalysis(sources: SourceRecord[], claimText: string): Anal
     ],
     summary: null,
     takes: [],
+    verdict: null,
   };
 }
 
 // ── Analysis builder ──────────────────────────────────────────────────────────
 
-function buildAnalysis(claimText: string, sources: SourceRecord[], category: string, claudeSummary: string | null) {
+const ALLOWED_VERDICTS = ['True', 'Mostly True', 'Misleading', 'Mostly False', 'False', 'Under Debate', 'Insufficient Evidence'];
+
+function buildAnalysis(claimText: string, sources: SourceRecord[], category: string, claudeSummary: string | null, claudeVerdict: string | null) {
   const highCred = sources.filter((s) => s.credibility_score >= 0.85);
   const count = highCred.length;
 
-  let status = 'Under Debate';
+  const status = (claudeVerdict && ALLOWED_VERDICTS.includes(claudeVerdict))
+    ? claudeVerdict
+    : (count === 0 ? 'Insufficient Evidence' : 'Under Debate');
+
   let evidenceQuality = 'Moderate';
   let summaryText: string;
 
   if (count === 0) {
-    status = 'Insufficient Evidence';
     evidenceQuality = 'Limited';
     summaryText = claudeSummary ?? 'Limited credible evidence is available to evaluate this claim comprehensively.';
   } else if (count >= 5) {
@@ -352,7 +362,7 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
   }
 
   const sourceAnalysis = await analyzeSourcesWithClaude(claimText, insertedSources);
-  const analysis = buildAnalysis(claimText, insertedSources, category, sourceAnalysis.summary);
+  const analysis = buildAnalysis(claimText, insertedSources, category, sourceAnalysis.summary, sourceAnalysis.verdict);
 
   await supabase.from('claims').update(analysis.claimUpdate).eq('id', claimId);
 
