@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { waitUntil } from '@vercel/functions';
+import Anthropic from '@anthropic-ai/sdk';
 
 // ── Supabase admin client (service role) ──────────────────────────────────────
 
@@ -91,72 +92,7 @@ interface SourceRecord {
   title: string;
 }
 
-// ── Consensus & disputes ──────────────────────────────────────────────────────
-
-function findConsensusAndDisputes(sources: SourceRecord[], claimText: string) {
-  const claimWords = new Set(claimText.toLowerCase().split(/\s+/).filter((w) => w.length > 4));
-
-  const sourceAnalysis = sources
-    .filter((s) => s.snippet_text && s.snippet_text.length > 30)
-    .map((s) => {
-      const snippet = s.snippet_text!.toLowerCase();
-      const supportSignals = ['confirmed','supports','evidence shows','research shows','study found','data shows','according to','consistent with','demonstrates','indicates','suggests that','found that'].filter((sig) => snippet.includes(sig)).length;
-      const disputeSignals = ['however','disputed','controversial','debated','conflicting','disagree','challenge','question','unclear','mixed results','no evidence','insufficient','contradicts','misleading','overstate','exaggerate','nuanced','complex'].filter((sig) => snippet.includes(sig)).length;
-      return { source: s, supportSignals, disputeSignals, leanSupport: supportSignals > disputeSignals, leanDispute: disputeSignals > supportSignals };
-    });
-
-  const supportingSources = sourceAnalysis.filter((a) => a.leanSupport);
-  const disputingSources = sourceAnalysis.filter((a) => a.leanDispute);
-  const neutralSources = sourceAnalysis.filter((a) => !a.leanSupport && !a.leanDispute);
-
-  const consensus: Array<{ text: string; sourceIds: string[] }> = [];
-  const disputes: Array<{ text: string; sourceIds: string[] }> = [];
-
-  if (supportingSources.length >= 2) {
-    consensus.push({ text: `${supportingSources.slice(0,3).map((a) => a.source.publisher).join(', ')} provide corroborating evidence on key aspects of this claim`, sourceIds: supportingSources.map((a) => a.source.id) });
-  }
-
-  const typeGroups: Record<string, typeof sourceAnalysis> = {};
-  for (const a of sourceAnalysis) {
-    if (!typeGroups[a.source.source_type]) typeGroups[a.source.source_type] = [];
-    typeGroups[a.source.source_type].push(a);
-  }
-  for (const [type, group] of Object.entries(typeGroups)) {
-    if (group.length >= 2) {
-      consensus.push({ text: `Multiple ${type.toLowerCase()} sources address this topic, providing consistent coverage`, sourceIds: group.map((a) => a.source.id) });
-      break;
-    }
-  }
-
-  const highCred = sourceAnalysis.filter((a) => a.source.credibility_score >= 0.85);
-  if (highCred.length >= 2 && consensus.length < 3) {
-    consensus.push({ text: 'High-credibility sources agree on the factual basis underlying this topic', sourceIds: highCred.map((a) => a.source.id) });
-  }
-
-  if (neutralSources.length > 0 && consensus.length < 4) {
-    consensus.push({ text: 'The broader context and background facts are well-documented across sources', sourceIds: neutralSources.map((a) => a.source.id) });
-  }
-
-  if (disputingSources.length >= 1) {
-    disputes.push({ text: `${disputingSources.slice(0,2).map((a) => a.source.publisher).join(' and ')} ${disputingSources.length === 1 ? 'raises' : 'raise'} questions about specific aspects or interpretations`, sourceIds: disputingSources.map((a) => a.source.id) });
-  }
-
-  if (supportingSources.length > 0 && disputingSources.length > 0) {
-    disputes.push({ text: 'Sources differ on the scope and magnitude of claims made, suggesting the reality is more nuanced', sourceIds: [...supportingSources.slice(0,1).map((a) => a.source.id), ...disputingSources.slice(0,1).map((a) => a.source.id)] });
-  }
-
-  const methodTypes = new Set(sourceAnalysis.map((a) => a.source.source_type));
-  if (methodTypes.size >= 3 && disputes.length < 3) {
-    disputes.push({ text: `Different source types (${Array.from(methodTypes).slice(0,3).join(', ').toLowerCase()}) approach this topic from different angles, leading to varying emphasis`, sourceIds: sourceAnalysis.slice(0,3).map((a) => a.source.id) });
-  }
-
-  if (consensus.length === 0) consensus.push({ text: 'Available sources address this topic but with limited overlap in their specific findings', sourceIds: sourceAnalysis.slice(0,2).map((a) => a.source.id) });
-  if (disputes.length === 0 && sourceAnalysis.length > 1) disputes.push({ text: 'While sources cover this topic, the specific conclusions and emphasis vary between them', sourceIds: sourceAnalysis.slice(0,2).map((a) => a.source.id) });
-
-  return { consensus: consensus.slice(0,4), disputes: disputes.slice(0,4) };
-}
-
-// ── Arguments ─────────────────────────────────────────────────────────────────
+// ── Types shared by analysis ──────────────────────────────────────────────────
 
 interface ArgumentRecord {
   side: 'supporting' | 'opposing';
@@ -166,105 +102,117 @@ interface ArgumentRecord {
   strength: 'strong' | 'moderate' | 'weak';
 }
 
-function buildArguments(sources: SourceRecord[], claimText: string, category: string): ArgumentRecord[] {
-  const claimWords = new Set(claimText.toLowerCase().split(/\s+/).filter((w) => w.length > 4));
+interface AnalysisResult {
+  consensus: Array<{ text: string; sourceIds: string[] }>;
+  disputes: Array<{ text: string; sourceIds: string[] }>;
+  arguments: ArgumentRecord[];
+}
 
-  const analyzed = sources
-    .filter((s) => s.snippet_text && s.snippet_text.length > 30)
-    .map((s) => {
-      const snippet = s.snippet_text!.toLowerCase();
-      const supportSignals = ['confirmed','supports','evidence shows','research shows','study found','data shows','consistent with','demonstrates','indicates','suggests that','found that','according to','proven','established','validates','corroborates'].filter((sig) => snippet.includes(sig)).length;
-      const againstSignals = ['however','disputed','controversial','debated','conflicting','disagree','challenge','question','unclear','mixed results','no evidence','insufficient','contradicts','misleading','overstate','exaggerate','nuanced','complex','limited','caveat','exception','but','although','despite','fails to','does not','unlikely','refutes'].filter((sig) => snippet.includes(sig)).length;
-      const relevance = Array.from(claimWords).filter((w) => snippet.includes(w)).length / Math.max(claimWords.size, 1);
-      return { source: s, supportSignals, againstSignals, relevance, side: supportSignals > againstSignals ? 'supporting' as const : againstSignals > supportSignals ? 'opposing' as const : 'neutral' as const };
+// ── Claude-powered source analysis ───────────────────────────────────────────
+
+async function analyzeSourcesWithClaude(
+  claimText: string,
+  sources: SourceRecord[],
+): Promise<AnalysisResult> {
+  const validSources = sources.filter((s) => s.snippet_text && s.snippet_text.length > 30);
+  if (validSources.length === 0) {
+    return { consensus: [], disputes: [], arguments: [] };
+  }
+
+  const sourceList = validSources
+    .map((s, i) => `Source ${i + 1} [id:${s.id}] (${s.publisher}, credibility:${s.credibility_score}):\n${s.snippet_text}`)
+    .join('\n\n');
+
+  const prompt = `You are analyzing sources to evaluate the following claim:
+
+CLAIM: "${claimText}"
+
+Here are the retrieved sources. For each source, determine whether it SUPPORTS the claim (evidence the claim is true), OPPOSES it (evidence the claim is false or misleading), or is NEUTRAL.
+
+${sourceList}
+
+Return ONLY valid JSON with this exact structure (no markdown, no explanation):
+{
+  "consensus": [
+    {"text": "What the sources broadly agree on (factual statement)", "sourceIds": ["id1", "id2"]}
+  ],
+  "disputes": [
+    {"text": "Where sources conflict or what complicates the claim", "sourceIds": ["id1", "id2"]}
+  ],
+  "supporting_args": [
+    {"argument_text": "Specific argument FOR the claim being true", "evidence_text": "Direct quote or finding from a source", "source_ids": ["id1"], "strength": "strong"}
+  ],
+  "opposing_args": [
+    {"argument_text": "Specific argument AGAINST the claim or why it's misleading", "evidence_text": "Direct quote or finding from a source", "source_ids": ["id1"], "strength": "moderate"}
+  ]
+}
+
+Rules:
+- strength must be "strong", "moderate", or "weak"
+- Use the exact id values from [id:...] in your sourceIds/source_ids arrays
+- Generate 2-3 items per section
+- Base arguments on what the sources actually say, not generic statements
+- consensus = what multiple sources agree on (factual, not just "sources exist")
+- disputes = genuine conflicts between sources or important caveats
+- supporting_args = arguments FOR the claim being true/accurate
+- opposing_args = arguments AGAINST the claim or why it might be false/overstated`;
+
+  try {
+    const client = new Anthropic();
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
     });
 
-  const forSources = analyzed.filter((a) => a.side === 'supporting').sort((a, b) => b.relevance - a.relevance);
-  const againstSources = analyzed.filter((a) => a.side === 'opposing').sort((a, b) => b.relevance - a.relevance);
-  const neutralSources = analyzed.filter((a) => a.side === 'neutral');
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const parsed = JSON.parse(text.trim());
 
-  const args: ArgumentRecord[] = [];
+    const consensus = (parsed.consensus || []).slice(0, 4).map((p: { text: string; sourceIds: string[] }) => ({
+      text: p.text,
+      sourceIds: (p.sourceIds || []).filter((id: string) => sources.some((s) => s.id === id)),
+    }));
 
-  if (forSources.length > 0) {
-    const primary = forSources[0];
-    const strength: 'strong' | 'moderate' | 'weak' = primary.source.credibility_score >= 0.85 ? 'strong' : primary.source.credibility_score >= 0.7 ? 'moderate' : 'weak';
-    const evidenceSentence = primary.source.snippet_text!.split(/[.!?]+/).map((s) => s.trim()).find((s) => s.length > 20) || null;
-    args.push({ side: 'supporting', argument_text: forSources.length > 1 ? `${forSources.length} sources provide evidence supporting this claim, including ${primary.source.source_type.toLowerCase()} from ${primary.source.publisher}` : `${primary.source.publisher} (${primary.source.source_type.toLowerCase()}) provides evidence that supports this claim`, evidence_text: evidenceSentence, source_ids: forSources.slice(0,4).map((a) => a.source.id), strength });
+    const disputes = (parsed.disputes || []).slice(0, 4).map((p: { text: string; sourceIds: string[] }) => ({
+      text: p.text,
+      sourceIds: (p.sourceIds || []).filter((id: string) => sources.some((s) => s.id === id)),
+    }));
+
+    const supporting: ArgumentRecord[] = (parsed.supporting_args || []).slice(0, 4).map((a: { argument_text: string; evidence_text: string | null; source_ids: string[]; strength: string }) => ({
+      side: 'supporting' as const,
+      argument_text: a.argument_text,
+      evidence_text: a.evidence_text || null,
+      source_ids: (a.source_ids || []).filter((id: string) => sources.some((s) => s.id === id)),
+      strength: (['strong', 'moderate', 'weak'].includes(a.strength) ? a.strength : 'moderate') as 'strong' | 'moderate' | 'weak',
+    }));
+
+    const opposing: ArgumentRecord[] = (parsed.opposing_args || []).slice(0, 4).map((a: { argument_text: string; evidence_text: string | null; source_ids: string[]; strength: string }) => ({
+      side: 'opposing' as const,
+      argument_text: a.argument_text,
+      evidence_text: a.evidence_text || null,
+      source_ids: (a.source_ids || []).filter((id: string) => sources.some((s) => s.id === id)),
+      strength: (['strong', 'moderate', 'weak'].includes(a.strength) ? a.strength : 'moderate') as 'strong' | 'moderate' | 'weak',
+    }));
+
+    return { consensus, disputes, arguments: [...supporting, ...opposing] };
+  } catch (err) {
+    console.error('Claude analysis failed, using fallback:', err);
+    return buildFallbackAnalysis(sources, claimText);
   }
+}
 
-  const forByType: Record<string, typeof forSources> = {};
-  for (const a of forSources) {
-    if (!forByType[a.source.source_type]) forByType[a.source.source_type] = [];
-    forByType[a.source.source_type].push(a);
-  }
-  for (const [type, group] of Object.entries(forByType)) {
-    if (group.length >= 2) {
-      args.push({ side: 'supporting', argument_text: `Multiple ${type.toLowerCase()} sources independently corroborate key aspects of this claim`, evidence_text: `${group.map((a) => a.source.publisher).join(', ')} each present supporting findings`, source_ids: group.map((a) => a.source.id), strength: group.some((a) => a.source.credibility_score >= 0.85) ? 'strong' : 'moderate' });
-      break;
-    }
-  }
+// ── Fallback heuristic (used if Claude API unavailable) ────────────────────────
 
-  const highCredFor = forSources.filter((a) => a.source.credibility_score >= 0.85);
-  if (highCredFor.length > 0 && args.filter((a) => a.side === 'supporting').length < 3) {
-    args.push({ side: 'supporting', argument_text: `Highly credible sources (${highCredFor.slice(0,2).map((a) => a.source.publisher).join(', ')}) support this position`, evidence_text: highCredFor[0].source.snippet_text?.split(/[.!?]+/)[0]?.trim() || null, source_ids: highCredFor.slice(0,3).map((a) => a.source.id), strength: 'strong' });
-  }
-
-  if (againstSources.length > 0) {
-    const primary = againstSources[0];
-    const strength: 'strong' | 'moderate' | 'weak' = primary.source.credibility_score >= 0.85 ? 'strong' : primary.source.credibility_score >= 0.7 ? 'moderate' : 'weak';
-    const evidenceSentence = primary.source.snippet_text!.split(/[.!?]+/).map((s) => s.trim()).find((s) => s.length > 20) || null;
-    args.push({ side: 'opposing', argument_text: againstSources.length > 1 ? `${againstSources.length} sources raise concerns or contradictions, including ${primary.source.source_type.toLowerCase()} from ${primary.source.publisher}` : `${primary.source.publisher} (${primary.source.source_type.toLowerCase()}) presents evidence that challenges this claim`, evidence_text: evidenceSentence, source_ids: againstSources.slice(0,4).map((a) => a.source.id), strength });
-  }
-
-  if (againstSources.length > 0) {
-    const snippets = againstSources.map((a) => a.source.snippet_text!.toLowerCase());
-    const hasMethodConcern = snippets.some((s) => ['limited sample','methodology','small study','correlation','confounding','bias','not peer-reviewed','anecdotal'].some((term) => s.includes(term)));
-    const hasScopeConcern = snippets.some((s) => ['overstate','exaggerate','more nuanced','context','specific conditions','not generalizable','exceptions'].some((term) => s.includes(term)));
-    if (hasMethodConcern) {
-      args.push({ side: 'opposing', argument_text: 'Sources raise methodological concerns about the evidence supporting this claim', evidence_text: 'Questions include study design limitations, sample size issues, or potential confounding variables', source_ids: againstSources.slice(0,2).map((a) => a.source.id), strength: 'moderate' });
-    } else if (hasScopeConcern) {
-      args.push({ side: 'opposing', argument_text: 'Sources suggest the claim overstates or oversimplifies the evidence', evidence_text: 'The reality appears more nuanced than the claim presents, with important caveats and context', source_ids: againstSources.slice(0,2).map((a) => a.source.id), strength: 'moderate' });
-    }
-  }
-
-  if (args.filter((a) => a.side === 'opposing').length === 0 && neutralSources.length > 0) {
-    args.push({ side: 'opposing', argument_text: 'While not directly contradicted, sources suggest the topic is more complex than the claim implies', evidence_text: 'Multiple sources provide context that complicates a simple verdict', source_ids: neutralSources.slice(0,2).map((a) => a.source.id), strength: 'weak' });
-  }
-
-  if (args.filter((a) => a.side === 'supporting').length === 0 && sources.length > 0) {
-    args.push({ side: 'supporting', argument_text: 'Some sources address this topic in a way that lends partial support to the claim', evidence_text: null, source_ids: sources.slice(0,2).map((s) => s.id), strength: 'weak' });
-  }
-
-  const categoryContextFor: Record<string, string> = {
-    health: 'Clinical studies or institutional health guidance provides support for some aspects of this claim',
-    science: 'Published research findings align with core elements of this claim',
-    environment: 'Environmental monitoring data or scientific assessments support key parts of this claim',
-    technology: 'Industry data and technical analyses support the general direction of this claim',
-    politics: 'Official records, policy documents, or nonpartisan analyses support elements of this claim',
-    economics: 'Economic data and institutional analyses support the trend described in this claim',
+function buildFallbackAnalysis(sources: SourceRecord[], claimText: string): AnalysisResult {
+  const ids = sources.slice(0, 4).map((s) => s.id);
+  return {
+    consensus: [{ text: 'Multiple sources address this topic and provide relevant context', sourceIds: ids.slice(0, 2) }],
+    disputes: [{ text: 'Sources vary in their emphasis and specific conclusions on this topic', sourceIds: ids.slice(0, 2) }],
+    arguments: [
+      { side: 'supporting', argument_text: 'Some sources provide evidence consistent with this claim', evidence_text: sources[0]?.snippet_text?.split(/[.!?]+/)[0]?.trim() || null, source_ids: ids.slice(0, 2), strength: 'moderate' },
+      { side: 'opposing', argument_text: 'Other sources present information that complicates or challenges this claim', evidence_text: null, source_ids: ids.slice(1, 3), strength: 'moderate' },
+    ],
   };
-
-  const categoryContextAgainst: Record<string, string> = {
-    health: 'Health claims are complex — individual variation, study limitations, and evolving research mean certainty is hard to achieve',
-    science: 'Scientific understanding evolves, and current evidence may be preliminary, contested, or limited in scope',
-    environment: 'Environmental systems are complex, and claims often oversimplify interactions between variables',
-    technology: 'Technology predictions frequently overestimate speed of adoption and underestimate barriers',
-    politics: 'Political claims often involve selective framing, and the full picture is usually more nuanced',
-    economics: 'Economic claims are sensitive to timeframes, methodology choices, and which variables are included',
-  };
-
-  if (categoryContextFor[category] && args.filter((a) => a.side === 'supporting').length < 3) {
-    args.push({ side: 'supporting', argument_text: categoryContextFor[category], evidence_text: null, source_ids: forSources.slice(0,2).map((a) => a.source.id), strength: 'moderate' });
-  }
-
-  if (categoryContextAgainst[category] && args.filter((a) => a.side === 'opposing').length < 3) {
-    args.push({ side: 'opposing', argument_text: categoryContextAgainst[category], evidence_text: null, source_ids: againstSources.slice(0,2).map((a) => a.source.id), strength: 'moderate' });
-  }
-
-  const strengthOrder = { strong: 0, moderate: 1, weak: 2 };
-  const forArgs = args.filter((a) => a.side === 'supporting').sort((a, b) => strengthOrder[a.strength] - strengthOrder[b.strength]).slice(0,4);
-  const againstArgs = args.filter((a) => a.side === 'opposing').sort((a, b) => strengthOrder[a.strength] - strengthOrder[b.strength]).slice(0,4);
-  return [...forArgs, ...againstArgs];
 }
 
 // ── Analysis builder ──────────────────────────────────────────────────────────
@@ -299,8 +247,6 @@ function buildAnalysis(claimText: string, sources: SourceRecord[], category: str
   };
 
   const takes = sources.slice(0,4).map((s) => `According to ${s.publisher}, ${s.snippet_text || 'evidence suggests nuanced interpretation of this claim.'}`);
-  const { consensus, disputes } = findConsensusAndDisputes(sources, claimText);
-  const arguments_ = buildArguments(sources, claimText, category);
 
   return {
     claimUpdate: {
@@ -311,9 +257,6 @@ function buildAnalysis(claimText: string, sources: SourceRecord[], category: str
       updated_at: new Date().toISOString(),
     },
     takes,
-    consensus,
-    disputes,
-    arguments: arguments_,
   };
 }
 
@@ -362,6 +305,7 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
   }
 
   const analysis = buildAnalysis(claimText, insertedSources, category);
+  const sourceAnalysis = await analyzeSourcesWithClaude(claimText, insertedSources);
 
   await supabase.from('claims').update(analysis.claimUpdate).eq('id', claimId);
 
@@ -369,16 +313,16 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
     await supabase.from('claim_takes').insert(analysis.takes.map((t, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, take_text: t, display_order: i })));
   }
 
-  if (analysis.consensus.length > 0) {
-    await supabase.from('claim_consensus_points').insert(analysis.consensus.map((p, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, point_text: p.text, source_ids: p.sourceIds, display_order: i })));
+  if (sourceAnalysis.consensus.length > 0) {
+    await supabase.from('claim_consensus_points').insert(sourceAnalysis.consensus.map((p, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, point_text: p.text, source_ids: p.sourceIds, display_order: i })));
   }
 
-  if (analysis.disputes.length > 0) {
-    await supabase.from('claim_disputes').insert(analysis.disputes.map((p, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, point_text: p.text, source_ids: p.sourceIds, display_order: i })));
+  if (sourceAnalysis.disputes.length > 0) {
+    await supabase.from('claim_disputes').insert(sourceAnalysis.disputes.map((p, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, point_text: p.text, source_ids: p.sourceIds, display_order: i })));
   }
 
-  if (analysis.arguments.length > 0) {
-    await supabase.from('claim_arguments').insert(analysis.arguments.map((a, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, side: a.side, argument_text: a.argument_text, evidence_text: a.evidence_text, source_ids: a.source_ids, strength: a.strength, display_order: i })));
+  if (sourceAnalysis.arguments.length > 0) {
+    await supabase.from('claim_arguments').insert(sourceAnalysis.arguments.map((a, i) => ({ claim_id: claimId, claim_run_id: claimRunData.id, side: a.side, argument_text: a.argument_text, evidence_text: a.evidence_text, source_ids: a.source_ids, strength: a.strength, display_order: i })));
   }
 
   await supabase.from('claim_runs').update({ run_status: 'completed', completed_at: new Date().toISOString() }).eq('id', claimRunData.id);
