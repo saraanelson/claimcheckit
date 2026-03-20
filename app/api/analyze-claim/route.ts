@@ -43,11 +43,25 @@ function classifySourceType(url: string): string {
 
 function credibilityScore(url: string): number {
   const l = url.toLowerCase();
-  if (l.includes('.gov') || l.includes('.edu')) return 0.95;
-  if (l.includes('nature.com') || l.includes('science.org')) return 0.95;
-  if (l.includes('who.int') || l.includes('cdc.gov')) return 0.95;
-  if (l.includes('reuters.com') || l.includes('apnews.com')) return 0.9;
-  if (l.includes('bbc.com') || l.includes('theguardian.com')) return 0.85;
+  // Tier 1A: Government & intergovernmental
+  if (l.includes('.gov') || l.includes('who.int') || l.includes('worldbank.org') || l.includes('un.org')) return 0.95;
+  // Tier 1B: Academic institutions
+  if (l.includes('.edu') || l.includes('pubmed') || l.includes('ncbi.nlm.nih.gov') || l.includes('nih.gov')) return 0.95;
+  // Tier 1C: Prestigious medical/science journals
+  if (l.includes('nejm.org') || l.includes('lancet.com') || l.includes('jama.jamanetwork.com') ||
+      l.includes('bmj.com') || l.includes('nature.com') || l.includes('science.org') ||
+      l.includes('cochrane.org') || l.includes('plos.org') || l.includes('cell.com')) return 0.95;
+  // Tier 1D: Major medical institutions
+  if (l.includes('mayoclinic.org') || l.includes('clevelandclinic.org') || l.includes('hopkinsmedicine.org') ||
+      l.includes('medlineplus.gov')) return 0.92;
+  // Tier 1E: Dedicated fact-checkers
+  if (l.includes('snopes.com') || l.includes('politifact.com') || l.includes('factcheck.org') ||
+      l.includes('fullfact.org')) return 0.90;
+  // Tier 2: Wire services & major international news
+  if (l.includes('reuters.com') || l.includes('apnews.com') || l.includes('bbc.com') ||
+      l.includes('theguardian.com') || l.includes('nytimes.com') || l.includes('washingtonpost.com') ||
+      l.includes('npr.org') || l.includes('pbs.org') || l.includes('economist.com') ||
+      l.includes('ft.com') || l.includes('wsj.com') || l.includes('bloomberg.com')) return 0.85;
   return 0.7;
 }
 
@@ -137,18 +151,32 @@ interface AnalysisResult {
 
 // ── Claude-powered source analysis ───────────────────────────────────────────
 
+const CATEGORY_SOURCE_RULES: Record<string, string> = {
+  health: 'For this HEALTH claim: only AUTHORITATIVE or HIGH-CREDIBILITY medical/government sources (CDC, NIH, WHO, peer-reviewed journals, major medical institutions, Mayo Clinic) should determine the verdict. General news coverage of a health topic without citing studies is GENERAL weight only.',
+  science: 'For this SCIENCE claim: peer-reviewed journals, academic institutions, and scientific bodies are AUTHORITATIVE. Media summaries of science without citing primary research are GENERAL weight only.',
+  politics: 'For this POLITICS claim: prioritize non-partisan sources (AP, Reuters, government data, academic political science). Do not treat advocacy organizations or partisan outlets as AUTHORITATIVE.',
+  economics: 'For this ECONOMICS claim: government statistics (BLS, Fed, World Bank, IMF), peer-reviewed economics research, and established financial institutions are AUTHORITATIVE.',
+  environment: 'For this ENVIRONMENT claim: IPCC, EPA, NOAA, peer-reviewed climate science, and government environmental agencies are AUTHORITATIVE.',
+};
+
 async function analyzeSourcesWithClaude(
   claimText: string,
   sources: SourceRecord[],
+  category: string,
 ): Promise<AnalysisResult> {
   const validSources = sources.filter((s) => s.snippet_text && s.snippet_text.length > 30);
   if (validSources.length === 0) {
     return { consensus: [], disputes: [], arguments: [], summary: null, takes: [], verdict: null };
   }
 
+  const tierLabel = (score: number) =>
+    score >= 0.95 ? 'AUTHORITATIVE' : score >= 0.90 ? 'HIGH-CREDIBILITY' : score >= 0.85 ? 'CREDIBLE' : 'GENERAL';
+
   const sourceList = validSources
-    .map((s, i) => `Source ${i + 1} [id:${s.id}] (${s.publisher}, credibility:${s.credibility_score}):\n${s.snippet_text}`)
+    .map((s, i) => `Source ${i + 1} [id:${s.id}] (${s.publisher}, ${tierLabel(s.credibility_score)}):\n${s.snippet_text}`)
     .join('\n\n');
+
+  const categoryRule = CATEGORY_SOURCE_RULES[category.toLowerCase()] ?? '';
 
   const prompt = `You are a fact-checking analyst evaluating the following claim using only the sources provided.
 
@@ -191,6 +219,8 @@ Return ONLY valid JSON — no markdown, no explanation, just the JSON object.
 
 STRICT RULES:
 - verdict must be exactly one of: "True", "Mostly True", "Misleading", "Mostly False", "False", "Under Debate", "Insufficient Evidence" — choose based on what the preponderance of credible sources say about the claim AS STATED; if most sources contradict it, use "False" or "Mostly False"
+- Source authority: AUTHORITATIVE sources (government, peer-reviewed journals, WHO, CDC, NIH, major medical institutions, dedicated fact-checkers) outweigh multiple GENERAL sources. If 1+ AUTHORITATIVE source directly contradicts the claim and no AUTHORITATIVE source supports it, the verdict MUST be "False" or "Mostly False". Do not let many GENERAL sources override a clear AUTHORITATIVE consensus.
+${categoryRule ? `- ${categoryRule}` : ''}
 - source_ids and sourceIds must use the EXACT UUID values from [id:...] in the sources above
 - evidence_text MUST be a direct quote from the snippet — copy the words, do not paraphrase
 - argument_text must be ONE sentence, specific to this exact claim, grounded in a source
@@ -361,7 +391,7 @@ async function runAnalysis(claimId: string, claimText: string, category: string)
     if (data) insertedSources.push(data);
   }
 
-  const sourceAnalysis = await analyzeSourcesWithClaude(claimText, insertedSources);
+  const sourceAnalysis = await analyzeSourcesWithClaude(claimText, insertedSources, category);
   const analysis = buildAnalysis(claimText, insertedSources, category, sourceAnalysis.summary, sourceAnalysis.verdict);
 
   await supabase.from('claims').update(analysis.claimUpdate).eq('id', claimId);

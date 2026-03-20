@@ -40,11 +40,19 @@ type SourceTier = 1 | 2 | 3 | 4;
 function getSourceTier(source: Source): SourceTier {
   const url = source.url.toLowerCase();
   if (url.includes('.gov') || url.includes('.edu') || url.includes('pubmed') ||
-      url.includes('nature.com') || url.includes('science.org') ||
-      url.includes('who.int') || url.includes('cdc.gov') || url.includes('worldbank.org')) return 1;
+      url.includes('ncbi.nlm.nih.gov') || url.includes('nih.gov') ||
+      url.includes('nature.com') || url.includes('science.org') || url.includes('who.int') ||
+      url.includes('worldbank.org') || url.includes('un.org') ||
+      url.includes('nejm.org') || url.includes('lancet.com') || url.includes('jama.jamanetwork.com') ||
+      url.includes('bmj.com') || url.includes('cochrane.org') || url.includes('plos.org') || url.includes('cell.com') ||
+      url.includes('mayoclinic.org') || url.includes('clevelandclinic.org') || url.includes('hopkinsmedicine.org') ||
+      url.includes('snopes.com') || url.includes('politifact.com') || url.includes('factcheck.org') ||
+      url.includes('fullfact.org')) return 1;
   if (url.includes('reuters.com') || url.includes('apnews.com') ||
       url.includes('bbc.com') || url.includes('theguardian.com') ||
       url.includes('nytimes.com') || url.includes('washingtonpost.com') ||
+      url.includes('npr.org') || url.includes('pbs.org') || url.includes('economist.com') ||
+      url.includes('bloomberg.com') || url.includes('wsj.com') || url.includes('ft.com') ||
       source.source_type === 'Wire service') return 2;
   if (source.source_type === 'Investigative journalism' || source.source_type === 'Expert commentary') return 3;
   return 4;
@@ -271,9 +279,15 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
   const againstArgs = arguments_.filter((a) => a.side === 'opposing');
   const hasArguments = forArgs.length > 0 || againstArgs.length > 0;
   const showBothSides = hasArguments && claim.current_status !== 'Insufficient Evidence';
-  const strengthWeight = (a: ClaimArgument) => a.strength === 'strong' ? 3 : a.strength === 'moderate' ? 2 : 1;
-  const forWeight = forArgs.reduce((s, a) => s + strengthWeight(a), 0);
-  const agWeight = againstArgs.reduce((s, a) => s + strengthWeight(a), 0);
+  const getArgWeight = (a: ClaimArgument): number => {
+    const backingSources = sources.filter((s) => a.source_ids?.includes(s.id));
+    const bestTier = backingSources.length > 0 ? Math.min(...backingSources.map(getSourceTier)) : 4;
+    const tierMult = bestTier === 1 ? 4 : bestTier === 2 ? 2.5 : bestTier === 3 ? 1.5 : 1;
+    const strengthMult = a.strength === 'strong' ? 3 : a.strength === 'moderate' ? 2 : 1;
+    return tierMult * strengthMult;
+  };
+  const forWeight = forArgs.reduce((s, a) => s + getArgWeight(a), 0);
+  const agWeight = againstArgs.reduce((s, a) => s + getArgWeight(a), 0);
   const totalWeight = forWeight + agWeight || 1;
   const forPct = Math.round((forWeight / totalWeight) * 100);
   const agPct = 100 - forPct;
