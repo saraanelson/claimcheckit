@@ -27,6 +27,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Shield,
+  XCircle,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import type { Claim, Source, ClaimTake, ClaimConsensusPoint, ClaimDispute, ClaimArgument } from '../../../lib/supabase';
@@ -39,11 +40,19 @@ type SourceTier = 1 | 2 | 3 | 4;
 function getSourceTier(source: Source): SourceTier {
   const url = source.url.toLowerCase();
   if (url.includes('.gov') || url.includes('.edu') || url.includes('pubmed') ||
-      url.includes('nature.com') || url.includes('science.org') ||
-      url.includes('who.int') || url.includes('cdc.gov') || url.includes('worldbank.org')) return 1;
+      url.includes('ncbi.nlm.nih.gov') || url.includes('nih.gov') ||
+      url.includes('nature.com') || url.includes('science.org') || url.includes('who.int') ||
+      url.includes('worldbank.org') || url.includes('un.org') ||
+      url.includes('nejm.org') || url.includes('lancet.com') || url.includes('jama.jamanetwork.com') ||
+      url.includes('bmj.com') || url.includes('cochrane.org') || url.includes('plos.org') || url.includes('cell.com') ||
+      url.includes('mayoclinic.org') || url.includes('clevelandclinic.org') || url.includes('hopkinsmedicine.org') ||
+      url.includes('snopes.com') || url.includes('politifact.com') || url.includes('factcheck.org') ||
+      url.includes('fullfact.org')) return 1;
   if (url.includes('reuters.com') || url.includes('apnews.com') ||
       url.includes('bbc.com') || url.includes('theguardian.com') ||
       url.includes('nytimes.com') || url.includes('washingtonpost.com') ||
+      url.includes('npr.org') || url.includes('pbs.org') || url.includes('economist.com') ||
+      url.includes('bloomberg.com') || url.includes('wsj.com') || url.includes('ft.com') ||
       source.source_type === 'Wire service') return 2;
   if (source.source_type === 'Investigative journalism' || source.source_type === 'Expert commentary') return 3;
   return 4;
@@ -104,11 +113,16 @@ function getFaviconUrl(url: string): string {
 // ── Verdict styling ───────────────────────────────────────────────────────────
 
 const VERDICT_CONFIG: Record<string, { icon: React.ReactNode; gradient: string; bg: string; border: string; text: string }> = {
-  'Well Supported':        { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
-  'Partially Supported':   { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-amber-500 to-yellow-500', bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-amber-200 dark:border-amber-800', text: 'text-amber-800 dark:text-amber-300' },
-  'Misleading':            { icon: <AlertOctagon className="w-8 h-8" />, gradient: 'from-red-600 to-rose-600', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-200 dark:border-red-800', text: 'text-red-800 dark:text-red-300' },
+  'True':                  { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
+  'Mostly True':           { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-teal-500 to-emerald-500', bg: 'bg-teal-50 dark:bg-teal-950/30', border: 'border-teal-200 dark:border-teal-800', text: 'text-teal-800 dark:text-teal-300' },
+  'Misleading':            { icon: <AlertOctagon className="w-8 h-8" />, gradient: 'from-orange-500 to-amber-500', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-200 dark:border-orange-800', text: 'text-orange-800 dark:text-orange-300' },
+  'Mostly False':          { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-orange-600 to-red-500', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-300 dark:border-orange-800', text: 'text-orange-900 dark:text-orange-300' },
+  'False':                 { icon: <XCircle className="w-8 h-8" />, gradient: 'from-red-600 to-rose-600', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-200 dark:border-red-800', text: 'text-red-800 dark:text-red-300' },
   'Under Debate':          { icon: <HelpCircle className="w-8 h-8" />, gradient: 'from-blue-600 to-indigo-600', bg: 'bg-blue-50 dark:bg-blue-950/30', border: 'border-blue-200 dark:border-blue-800', text: 'text-blue-800 dark:text-blue-300' },
   'Insufficient Evidence': { icon: <AlertCircle className="w-8 h-8" />, gradient: 'from-stone-500 to-stone-600', bg: 'bg-stone-100 dark:bg-stone-800/50', border: 'border-stone-200 dark:border-stone-700', text: 'text-stone-700 dark:text-stone-300' },
+  // legacy aliases
+  'Well Supported':        { icon: <CheckCircle className="w-8 h-8" />, gradient: 'from-emerald-600 to-green-600', bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-200 dark:border-emerald-800', text: 'text-emerald-800 dark:text-emerald-300' },
+  'Partially Supported':   { icon: <AlertTriangle className="w-8 h-8" />, gradient: 'from-amber-500 to-yellow-500', bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-amber-200 dark:border-amber-800', text: 'text-amber-800 dark:text-amber-300' },
 };
 
 function getEvidenceQualityColor(quality: string): string {
@@ -265,6 +279,19 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
   const againstArgs = arguments_.filter((a) => a.side === 'opposing');
   const hasArguments = forArgs.length > 0 || againstArgs.length > 0;
   const showBothSides = hasArguments && claim.current_status !== 'Insufficient Evidence';
+  const getArgWeight = (a: ClaimArgument): number => {
+    const backingSources = sources.filter((s) => a.source_ids?.includes(s.id));
+    const bestTier = backingSources.length > 0 ? Math.min(...backingSources.map(getSourceTier)) : 4;
+    const tierMult = bestTier === 1 ? 4 : bestTier === 2 ? 2.5 : bestTier === 3 ? 1.5 : 1;
+    const strengthMult = a.strength === 'strong' ? 3 : a.strength === 'moderate' ? 2 : 1;
+    return tierMult * strengthMult;
+  };
+  const forWeight = forArgs.reduce((s, a) => s + getArgWeight(a), 0);
+  const agWeight = againstArgs.reduce((s, a) => s + getArgWeight(a), 0);
+  const totalWeight = forWeight + agWeight || 1;
+  const forPct = Math.round((forWeight / totalWeight) * 100);
+  const agPct = 100 - forPct;
+  const evidenceLean = forPct >= 60 ? 'leans supporting' : agPct >= 60 ? 'leans challenging' : 'is split';
   const verdictCfg = VERDICT_CONFIG[claim.current_status] || VERDICT_CONFIG['Insufficient Evidence'];
 
   return (
@@ -344,7 +371,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Star className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                    <h3 className="font-semibold text-stone-900 dark:text-stone-100">Confidence Score</h3>
+                    <h3 className="font-semibold text-stone-900 dark:text-stone-100">Evidence Quality</h3>
                   </div>
                   <span className="text-3xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
                     {confidence}<span className="text-base font-normal text-stone-400">/100</span>
@@ -357,7 +384,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                   />
                 </div>
                 <p className="text-xs text-stone-400 dark:text-stone-500 mt-2">
-                  Weighted by source tier, recency, and {sources.length} credible source{sources.length !== 1 ? 's' : ''}
+                  How reliable and complete the sources are — not whether the claim is true
                 </p>
               </div>
             )}
@@ -417,9 +444,18 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                     </div>
                     <h3 className="font-serif text-2xl text-stone-900 dark:text-stone-100">Both Sides</h3>
                   </div>
-                  <p className="text-sm text-stone-500 dark:text-stone-400">
-                    Structured arguments for and against this claim, weighted by source credibility
+                  <p className="text-sm text-stone-500 dark:text-stone-400 mb-4">
+                    Evidence {evidenceLean} — {forArgs.length} supporting, {againstArgs.length} challenging
                   </p>
+                  {/* Balance bar */}
+                  <div className="flex rounded-full overflow-hidden h-2.5 bg-stone-100 dark:bg-stone-800">
+                    <div className="bg-emerald-500 transition-all duration-500" style={{ width: `${forPct}%` }} />
+                    <div className="bg-red-500 transition-all duration-500" style={{ width: `${agPct}%` }} />
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">{forPct}% supporting</span>
+                    <span className="text-[11px] text-red-500 dark:text-red-400 font-medium">{agPct}% challenging</span>
+                  </div>
                 </div>
 
                 {/* Two columns */}
@@ -437,20 +473,17 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                       {forArgs.length === 0 ? (
                         <p className="text-sm text-stone-400 dark:text-stone-500 italic py-2">No strong supporting arguments found</p>
                       ) : (
-                        forArgs.map((arg, i) => {
+                        forArgs.slice(0, 2).map((arg, i) => {
                           const backed = sources.filter((s) => arg.source_ids?.includes(s.id));
                           return (
                             <div key={arg.id || i} className={`animate-fade-up stagger-${Math.min(i + 1, 6)}`}>
-                              <div className="flex items-start gap-2 mb-1.5">
-                                <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                              <div className="flex items-start gap-2">
+                                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
                                   arg.strength === 'strong' ? 'bg-emerald-500' : arg.strength === 'moderate' ? 'bg-emerald-400' : 'bg-emerald-300'
                                 }`} />
                                 <div className="flex-1">
                                   <p className="text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug">{arg.argument_text}</p>
-                                  {arg.evidence_text && (
-                                    <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed italic">{arg.evidence_text}</p>
-                                  )}
-                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                       arg.strength === 'strong'
                                         ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
@@ -460,7 +493,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                     }`}>
                                       {arg.strength}
                                     </span>
-                                    {backed.slice(0, 2).map((s) => (
+                                    {backed.slice(0, 1).map((s) => (
                                       <a key={s.id} href={s.url} target="_blank" rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-teal-600 dark:text-teal-400 hover:underline truncate max-w-[120px]">
                                         {s.publisher || getDomain(s.url)}
@@ -469,7 +502,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                   </div>
                                 </div>
                               </div>
-                              {i < forArgs.length - 1 && <hr className="mt-4 border-stone-100 dark:border-stone-800" />}
+                              {i < Math.min(forArgs.length, 2) - 1 && <hr className="mt-3 border-stone-100 dark:border-stone-800" />}
                             </div>
                           );
                         })
@@ -490,20 +523,17 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                       {againstArgs.length === 0 ? (
                         <p className="text-sm text-stone-400 dark:text-stone-500 italic py-2">No strong challenging arguments found</p>
                       ) : (
-                        againstArgs.map((arg, i) => {
+                        againstArgs.slice(0, 2).map((arg, i) => {
                           const backed = sources.filter((s) => arg.source_ids?.includes(s.id));
                           return (
                             <div key={arg.id || i} className={`animate-fade-up stagger-${Math.min(i + 1, 6)}`}>
-                              <div className="flex items-start gap-2 mb-1.5">
-                                <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                              <div className="flex items-start gap-2">
+                                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
                                   arg.strength === 'strong' ? 'bg-red-500' : arg.strength === 'moderate' ? 'bg-red-400' : 'bg-red-300'
                                 }`} />
                                 <div className="flex-1">
                                   <p className="text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug">{arg.argument_text}</p>
-                                  {arg.evidence_text && (
-                                    <p className="text-xs text-stone-500 dark:text-stone-400 mt-1 leading-relaxed italic">{arg.evidence_text}</p>
-                                  )}
-                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                                     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                       arg.strength === 'strong'
                                         ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
@@ -513,7 +543,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                     }`}>
                                       {arg.strength}
                                     </span>
-                                    {backed.slice(0, 2).map((s) => (
+                                    {backed.slice(0, 1).map((s) => (
                                       <a key={s.id} href={s.url} target="_blank" rel="noopener noreferrer"
                                         className="text-[10px] font-medium text-teal-600 dark:text-teal-400 hover:underline truncate max-w-[120px]">
                                         {s.publisher || getDomain(s.url)}
@@ -522,7 +552,7 @@ export default function ClaimPage({ params }: { params: { id: string } }) {
                                   </div>
                                 </div>
                               </div>
-                              {i < againstArgs.length - 1 && <hr className="mt-4 border-stone-100 dark:border-stone-800" />}
+                              {i < Math.min(againstArgs.length, 2) - 1 && <hr className="mt-3 border-stone-100 dark:border-stone-800" />}
                             </div>
                           );
                         })
